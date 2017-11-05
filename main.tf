@@ -56,7 +56,6 @@ resource "aws_launch_configuration" "web_asg" {
   name = "web-asgc"
   image_id = "${data.aws_ami.ec2_ami.id}"
   instance_type = "t2.micro"
-  associate_public_ip_address = true
   user_data = <<-EOF
               #!/bin/bash
               echo "Hello, World" > index.html
@@ -74,22 +73,53 @@ resource "aws_autoscaling_group" "autoscaling_group" {
   max_size = "5"
   min_size = "1"
   desired_capacity = "2"
+  load_balancers = ["${aws_elb.elb.name}"]
   vpc_zone_identifier = ["${module.public_subnet.subnet_id}"]
-  health_check_grace_period = "60"
-  wait_for_capacity_timeout = "10m"
-  health_check_type = "EC2"
-  force_delete = false
-  enabled_metrics = [
-    "GroupMinSize",
-    "GroupMaxSize",
-    "GroupDesiredCapacity",
-    "GroupInServiceInstances",
-    "GroupPendingInstances",
-    "GroupStandbyInstances",
-    "GroupTerminatingInstances",
-    "GroupTotalInstances",
-  ]
+  health_check_type = "ELB"
   lifecycle {
     create_before_destroy = true
   }
+}
+
+resource "aws_security_group" "elb_security_group" {
+  name = "lunch-learn-elb-security-group"
+  vpc_id = "${module.vpc.vpc_id}"
+  ingress {
+    from_port = 80
+    to_port = 8080
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_elb" "elb" {
+  name = "lunch-learn-elb"
+  subnets = ["${module.public_subnet.subnet_id}"]
+  security_groups = ["${aws_security_group.elb_security_group.id}"]
+
+  listener {
+    lb_port = 80
+    lb_protocol = "http"
+    instance_port = "8080"
+    instance_protocol = "http"
+  }
+
+  health_check {
+    healthy_threshold = 2
+    unhealthy_threshold = 2
+    timeout = 3
+    interval = 30
+    target = "HTTP:8080/"
+  }
+}
+
+output "elb_dns_name" {
+  value = "${aws_elb.elb.dns_name}"
 }
